@@ -8,6 +8,8 @@
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <vector>
+#include <FS.h>
+#include <SPIFFS.h>
 
 //Serial.print("");
 //Serial.println("");
@@ -80,7 +82,7 @@ struct Track {
     std::string name;
     int thirtysecondNotesPerDivision;
     int maxTick = 0;
-    std::map<int, std::vector<bool>> bitmap;
+    std::map<int, std::bitset<88>> bitmap;
 };
 
 // Structure to store header information and tracks
@@ -91,7 +93,7 @@ struct MidiData {
     std::vector<Track> tracks;
     int division;
     int thirtysecondNotesPerDivision;
-    std::map<int, std::vector<bool>> bitmap;
+    std::map<int, std::bitset<88>> bitmap;
 };
 
 char noteOutput(Note note, bool hand);
@@ -463,12 +465,158 @@ char noteOutput(Note note, bool hand)
     }
     return temp;
 }
+void recording(std::bitset<88> notesplayed[])
+{
+    File file = SPIFFS.open("/recording.mid","w");
+    
+    if(!file)
+    {
+      Serial.println("Failed to open file for writing");
+      return;
+    }
+    else
+    {
+      Serial.println("File opened for writing");
+    }
+    //std::ofstream clearmidi("C:\\Users\\caden\\source\\repos\\testrecordingc++\\newFile.mid", std::ios::trunc);
+    //clearmidi.close();
+    //std::ofstream createdMidi("C:\\Users\\caden\\source\\repos\\testrecordingc++\\newFile.mid", std::ios::binary);
+    //if (!createdMidi.is_open())
+    //{
+    //    return;
+    //}
+    
+    // MIDI header
+    const char header[] = { 'M','T','h','d', 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x00, 0x80 };
 
+
+    // MIDI track header
+    const char trackHeader[] = { 'M', 'T', 'r', 'k' };
+
+    // MIDI events variables
+    unsigned int deltaTime = 0; // Delta time
+    unsigned int ticksPerQuarterNote = 120; // Ticks per quarter note
+    unsigned int noteDuration = ticksPerQuarterNote; // Duration of each note (quarter note)
+    std::vector<char> trackData; // Store MIDI events for this track
+    // Iterate over each set of notes played
+    // Initialize deltaTime outside the loop
+    for (size_t i = 0; i < 20; ++i) {
+        const auto& currentNotes = notesplayed[i];
+
+        // Iterate through each bit in the bitset
+        for (size_t j = 0; j < currentNotes.size(); ++j) {
+            // Check if the note is turned on (0 to 1 transition)
+            if (i == 0)
+            {
+                if (currentNotes[j])
+                {
+                    trackData.push_back(0x00);
+                    trackData.push_back(0x90); // Note-on status byte
+                    trackData.push_back(j + 20); // Note number
+                    trackData.push_back(0x7F); // Velocity (max velocity)
+                }
+
+            }
+            else if (currentNotes[j] && (!notesplayed[i - 1][j])) {
+                // Write MIDI note-on event with current deltaTime
+                // Calculate VLQ for delta time
+                std::vector<unsigned char> vlqBytes;
+                unsigned int deltaTimeValue = deltaTime;
+                do {
+                    unsigned char byte = deltaTimeValue & 0x7F; // Extract lowest 7 bits
+                    deltaTimeValue >>= 7; // Shift right by 7 bits
+                    if (deltaTimeValue > 0) {
+                        byte |= 0x80; // Set MSB if more bytes follow
+                    }
+                    vlqBytes.push_back(byte);
+                } while (deltaTimeValue > 0);
+
+                // Write VLQ bytes to trackData
+                for (auto it = vlqBytes.rbegin(); it != vlqBytes.rend(); ++it) {
+                    trackData.push_back(*it);
+                }
+                trackData.push_back(0x90); // Note-on status byte
+                trackData.push_back(j + 20); // Note number
+                trackData.push_back(0x7F); // Velocity (max velocity)
+            }
+            // Check if the note is turned off (1 to 0 transition)
+            else if (!currentNotes[j] && (notesplayed[i - 1][j])) 
+            {
+                // Write MIDI note-off event with current deltaTime
+                // Calculate VLQ for delta time
+                std::vector<unsigned char> vlqBytes;
+                unsigned int deltaTimeValue = deltaTime;
+                do {
+                    unsigned char byte = deltaTimeValue & 0x7F; // Extract lowest 7 bits
+                    deltaTimeValue >>= 7; // Shift right by 7 bits
+                    if (deltaTimeValue > 0) {
+                        byte |= 0x80; // Set MSB if more bytes follow
+                    }
+                    vlqBytes.push_back(byte);
+                } while (deltaTimeValue > 0);
+
+                // Write VLQ bytes to trackData
+                for (auto it = vlqBytes.rbegin(); it != vlqBytes.rend(); ++it) {
+                    trackData.push_back(*it);
+                }
+                trackData.push_back(0x80); // Note-off status byte
+                trackData.push_back(j + 20); // Note number
+                trackData.push_back(0x00); // Velocity (note-off)
+            }
+        }
+        
+        // Increment deltaTime by ticksPerQuarterNote for the next iteration
+        deltaTime = 120;
+    }
+
+
+    file.write((uint8_t*)header, sizeof(header));
+    //Write MIDI track header
+    file.write((uint8_t*)trackHeader, sizeof(trackHeader));
+    //createdMidi.write(header, sizeof(header));
+    // Write MIDI track header
+    //createdMidi.write(trackHeader, sizeof(trackHeader));
+
+    // Write track length
+    unsigned int trackLength = trackData.size();
+
+    uint8_t temp = trackLength >> 24;
+    file.write(&temp, sizeof(temp));
+    temp = trackLength >> 16;
+    file.write(&temp, sizeof(temp));
+    temp = trackLength >> 8;
+    file.write(&temp, sizeof(temp));
+    temp = trackLength;
+    file.write(&temp, sizeof(temp));
+
+    //createdMidi.put(trackLength >> 24);
+    //createdMidi.put(trackLength >> 16);
+    //createdMidi.put(trackLength >> 8);
+    //createdMidi.put(trackLength);
+
+    // Write track data
+    file.write((uint8_t*)trackData.data(), trackData.size());
+    //createdMidi.write(trackData.data(), trackData.size());
+
+    // Close the MIDI file
+    file.close();
+    //createdMidi.close();
+}
 #define LED_BUILTIN 2
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
     Serial.begin(115200);
+
+    if(SPIFFS.begin(true))
+    {
+      Serial.println("SPIFFS filesystem mounted successfully");
+      if(SPIFFS.exists("/recording.mid")) Serial.println("A recording exists in SPIFFS filesystem!");
+    }
+    else 
+    {
+      Serial.println("ERROR: SPIFFS filesystem mount failed!");
+    }
     delay(10);
 
     // We start by connecting to a WiFi network
@@ -533,6 +681,29 @@ void loop() {
     client.stop();
 
     pinMode(LED_BUILTIN, LOW);
+    std::bitset<88> bitsets[20]{};
+    bitsets[0][40]=1;
+    bitsets[1][40] = 0; 
+    bitsets[2][41] = 1;
+    bitsets[3][41] = 0; 
+    bitsets[4][42] = 1;
+    bitsets[5][42] = 0; 
+    bitsets[6][43] = 1;
+    bitsets[7][43] = 0; 
+    bitsets[8][44] = 1;
+    bitsets[9][44] = 0; 
+    bitsets[10][45] = 1;
+    bitsets[11][45] = 0; 
+    bitsets[12][46] = 1;
+    bitsets[13][46] = 0;
+    bitsets[14][47] = 1;
+    bitsets[15][47] = 0;
+    bitsets[16][48] = 1;
+    bitsets[17][48] = 0;
+    bitsets[18][48] = 1;
+    bitsets[19][48] = 0;
+    // Call recording function
+    recording(bitsets);
 
     // Open the MIDI file
     std::istringstream midiFile(midi, std::ios::binary);
@@ -603,7 +774,7 @@ void loop() {
         int counter = midiData.division / midiData.tracks[i].thirtysecondNotesPerDivision;
         for (int count = 0; count < midiData.tracks[i].maxTick; count = count + counter)
         {
-            midiData.tracks[i].bitmap[count] = std::vector<bool>(88, false);
+            midiData.tracks[i].bitmap[count] = std::move(std::bitset<88>());
         }
         for (int noteindex = 0; noteindex < notesize; noteindex++)
         {
@@ -613,13 +784,13 @@ void loop() {
             // Check if the tick count entry exists in the bitmap
             if (midiData.tracks[i].bitmap.find(tick) != midiData.tracks[i].bitmap.end()) {
                 // Access the bit vector associated with the tick count
-                std::vector<bool>& bitVector = midiData.tracks[i].bitmap[tick];
+                std::bitset<88>& bitVector = midiData.tracks[i].bitmap[tick];
                 bitVector[midiNote] = true;
             }
         }
        /*for (int index = 0; index < midiData.tracks[i].bitmap.size(); index++)
         {
-            std::vector<bool>& bitVector = midiData.tracks[i].bitmap[index * counter];
+            std::bitset<88>& bitVector = midiData.tracks[i].bitmap[index * counter];
             for(int count = 0; count < 88; count++)
             {
                 if (bitVector[count] == false)
@@ -642,13 +813,13 @@ void loop() {
     {
         for (int count = 0; count < midiData.tracks[1].maxTick; count = count + counter)
         {
-            midiData.bitmap[count] = std::vector<bool>(88, false);
+            midiData.bitmap[count] = std::move(std::bitset<88>());
         }
         for (int index = 0; index < midiData.tracks[1].bitmap.size(); index++)
         {
-            std::vector<bool>& bitVector = midiData.tracks[1].bitmap[index * counter];
-            std::vector<bool>& bitVector2 = midiData.tracks[2].bitmap[index * counter];
-            std::vector<bool>& midibitvector = midiData.bitmap[index * counter];
+            std::bitset<88>& bitVector = midiData.tracks[1].bitmap[index * counter];
+            std::bitset<88>& bitVector2 = midiData.tracks[2].bitmap[index * counter];
+            std::bitset<88>& midibitvector = midiData.bitmap[index * counter];
             for (int count = 0; count < 88; count++)
             {
                 midibitvector[count] = (bitVector[count] || bitVector2[count]);
@@ -661,12 +832,12 @@ void loop() {
     {
         for (int count = 0; count < midiData.tracks[1].maxTick; count = count + counter)
         {
-            midiData.bitmap[count] = std::vector<bool>(88, false);
+            midiData.bitmap[count] = std::move(std::bitset<88>());
         }
         for (int index = 0; index < midiData.tracks[1].bitmap.size(); index++)
         {
-            std::vector<bool>& bitVector = midiData.tracks[1].bitmap[index * counter];
-            std::vector<bool>& midibitvector = midiData.bitmap[index * counter];
+            std::bitset<88>& bitVector = midiData.tracks[1].bitmap[index * counter];
+            std::bitset<88>& midibitvector = midiData.bitmap[index * counter];
          //std::cin.ignore(); // Ignore any previous input
          //std::cin.get(); // Wait for a key press
             for (int count = 0; count < 88; count++)
@@ -678,7 +849,19 @@ void loop() {
     
     for (int index = 0; index < midiData.bitmap.size(); index++)
     {
-        std::vector<bool>& bitVector = midiData.bitmap[index * counter];
+        std::bitset<88>& bitVector = midiData.bitmap[index * counter];
+        bool fl = false;
+        for (int count = 0; count < 88; count++)
+        {
+            if (bitVector[count] == true)
+            {
+                      fl = true;
+            }
+        }
+        if (fl == false)
+        {
+            continue;
+        }
         for (int count = 0; count < 88; count++)
         {
             if (bitVector[count] == false)
