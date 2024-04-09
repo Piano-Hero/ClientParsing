@@ -603,6 +603,8 @@ void recording(std::bitset<88> notesplayed[])
     //createdMidi.close();
 }
 #define LED_BUILTIN 2
+#define RECORDING_MODE 0
+#define PLAYBACK_MODE 1
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
@@ -641,12 +643,15 @@ void setup()
 void loop() {
     const uint16_t port = 1235;
     const char * host = "172.20.10.2"; // ip or dns
+    int mode = RECORDING_MODE;
 
     Serial.print("Connecting to host machine ");
     Serial.println(host);
     pinMode(LED_BUILTIN, HIGH);
     // Use WiFiClient class to create TCP connections
     WiFiClient client;
+
+    File readFile = SPIFFS.open("/recording.mid","r");
 
     if (!client.connect(host, port)) {
         pinMode(LED_BUILTIN, LOW);
@@ -660,7 +665,41 @@ void loop() {
     //uncomment this line to send an arbitrary string to the server
     //client.print("Send this data to the server");
     //uncomment this line to send a basic document request to the server
-    client.print("GET /index.html HTTP/1.1\n\n");
+    
+    if      (mode == PLAYBACK_MODE ) client.print("GET\n\n");
+    else  if(mode == RECORDING_MODE)
+    {
+        pinMode(LED_BUILTIN, LOW);
+        std::bitset<88> bitsets[20]{};
+        bitsets[0][40]=  1;
+        bitsets[1][40] = 0; 
+        bitsets[2][41] = 1;
+        bitsets[3][41] = 0; 
+        bitsets[4][42] = 1;
+        bitsets[5][42] = 0; 
+        bitsets[6][43] = 1;
+        bitsets[7][43] = 0; 
+        bitsets[8][44] = 1;
+        bitsets[9][44] = 0; 
+        bitsets[10][45] = 1;
+        bitsets[11][45] = 0; 
+        bitsets[12][46] = 1;
+        bitsets[13][46] = 0;
+        bitsets[14][47] = 1;
+        bitsets[15][47] = 0;
+        bitsets[16][48] = 1;
+        bitsets[17][48] = 0;
+        bitsets[18][48] = 1;
+        bitsets[19][48] = 0;
+        // Call recording function
+        recording(bitsets);
+        client.print("PUT\n\n");
+        while(readFile.available())
+        {
+            char byte = readFile.read();
+            client.write(byte);
+        }
+    }
 
   int maxloops = 0;
 
@@ -670,41 +709,19 @@ void loop() {
     maxloops++;
     delay(1); //delay 1 msec
   }
-  while (client.available() > 0)
+
+  while (client.available() > 0 && mode == PLAYBACK_MODE)
   {
-    //read back one line from the server
-    char c = client.read();
-    midi.push_back(c);
-    Serial.print(c);
+        //read back one line from the server
+        char c = client.read();
+        midi.push_back(c);
+        Serial.print(c);
   }
     Serial.println("Closing connection.");
     client.stop();
 
-    pinMode(LED_BUILTIN, LOW);
-    std::bitset<88> bitsets[20]{};
-    bitsets[0][40]=1;
-    bitsets[1][40] = 0; 
-    bitsets[2][41] = 1;
-    bitsets[3][41] = 0; 
-    bitsets[4][42] = 1;
-    bitsets[5][42] = 0; 
-    bitsets[6][43] = 1;
-    bitsets[7][43] = 0; 
-    bitsets[8][44] = 1;
-    bitsets[9][44] = 0; 
-    bitsets[10][45] = 1;
-    bitsets[11][45] = 0; 
-    bitsets[12][46] = 1;
-    bitsets[13][46] = 0;
-    bitsets[14][47] = 1;
-    bitsets[15][47] = 0;
-    bitsets[16][48] = 1;
-    bitsets[17][48] = 0;
-    bitsets[18][48] = 1;
-    bitsets[19][48] = 0;
-    // Call recording function
-    recording(bitsets);
-
+if(mode == PLAYBACK_MODE)
+{
     // Open the MIDI file
     std::istringstream midiFile(midi, std::ios::binary);
 
@@ -877,9 +894,10 @@ void loop() {
         //std::cin.ignore(); // Ignore any previous input
         //std::cin.get(); // Wait for a key press
     }
-
+}
     /*
     Store in the cache
     */
+END:
     while(true){}
   }
