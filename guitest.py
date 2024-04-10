@@ -48,8 +48,12 @@ def start_server():
         break
 
 # Create GUI
-app = aj.gui("TCP Server", "300x250")
+app = aj.gui("Piano Hero Interface App", "400x300")
 app.setSticky("ew")
+
+# add logo
+app.addImage("logo","logo.gif")
+app.zoomImage("logo",-4)
 
 # Add widgets
 app.addLabel("title", "Enter MIDI file (skip.mid to skip):")
