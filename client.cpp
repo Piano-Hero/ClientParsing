@@ -643,7 +643,7 @@ void setup()
 void loop() {
     const uint16_t port = 1235;
     const char * host = "172.20.10.2"; // ip or dns
-    int mode = RECORDING_MODE;
+    int mode = PLAYBACK_MODE;
 
     Serial.print("Connecting to host machine ");
     Serial.println(host);
@@ -666,8 +666,40 @@ void loop() {
     //client.print("Send this data to the server");
     //uncomment this line to send a basic document request to the server
     
-    if      (mode == PLAYBACK_MODE ) client.print("GET\n\n");
-    else  if(mode == RECORDING_MODE)
+    client.print("GET\n\n");
+    
+  int maxloops = 0;
+
+  //wait for the server's reply to become available
+  while (!client.available() && maxloops < 1000)
+  {
+    maxloops++;
+    delay(1); //delay 1 msec
+  }
+
+  while (client.available() > 0 && mode == PLAYBACK_MODE)
+  {
+        //read back one line from the server
+        char c = client.read();
+        midi.push_back(c);
+        Serial.print(c);
+  }
+
+if(mode == PLAYBACK_MODE)
+{
+    // Open the MIDI file
+    std::istringstream midiFile(midi, std::ios::binary);
+
+    if (!midiFile) 
+    {
+        std::cerr << "Error opening the MIDI file." << std::endl;
+        return;
+    }
+
+    // Read the header chunk
+    char headerChunkID[4];
+    midiFile.read(headerChunkID, 4);
+    if(std::string(headerChunkID, 4) == "SKIP")
     {
         pinMode(LED_BUILTIN, LOW);
         std::bitset<88> bitsets[20]{};
@@ -699,41 +731,12 @@ void loop() {
             char byte = readFile.read();
             client.write(byte);
         }
+        Serial.println("Closing connection.");
+        client.stop();
+        while(true);
     }
-
-  int maxloops = 0;
-
-  //wait for the server's reply to become available
-  while (!client.available() && maxloops < 1000)
-  {
-    maxloops++;
-    delay(1); //delay 1 msec
-  }
-
-  while (client.available() > 0 && mode == PLAYBACK_MODE)
-  {
-        //read back one line from the server
-        char c = client.read();
-        midi.push_back(c);
-        Serial.print(c);
-  }
-    Serial.println("Closing connection.");
-    client.stop();
-
-if(mode == PLAYBACK_MODE)
-{
-    // Open the MIDI file
-    std::istringstream midiFile(midi, std::ios::binary);
-
-    if (!midiFile) 
-    {
-        std::cerr << "Error opening the MIDI file." << std::endl;
-        return;
-    }
-
-    // Read the header chunk
-    char headerChunkID[4];
-    midiFile.read(headerChunkID, 4);
+        Serial.println("Closing connection.");
+        client.stop();
 
     if (std::string(headerChunkID, 4) != "MThd") 
     {
