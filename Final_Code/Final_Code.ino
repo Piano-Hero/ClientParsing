@@ -800,6 +800,89 @@ void readSR(void) {
     return;
 }
 
+unsigned long past_time = 0;
+unsigned long p_time = 0;
+
+int idle_next[7] =   { 0b11000000, 0b11000000, 0b11000000, 0b11000000, 0b11000000, 0b11000000, 0b11000000 };
+int idle_first[7] =  { 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000 }; //initial first row
+int idle_second[7] = { 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00001100 };//initial second row
+int idle_third[7] =  { 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000 };//initial third row
+int idle_fourth[7] = { 0b11000000, 0b11000000, 0b11000000, 0b11000000, 0b11000000, 0b11000000, 0b11000000 };//initial fourth row
+int idle_hold[7] =   { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 };
+
+void idle_waterfall_display() 
+{
+  int array[Rows][7];
+  //after every cycle function this will be updated to next iteration of notes
+
+for (int k = 6; k > -1 ; k--) 
+       {
+        array[0][k] = idle_first[k];
+        array[1][k] = idle_second[k];
+        array[2][k] = idle_third[k];
+        array[3][k] = idle_fourth[k];
+       }
+
+  digitalWrite(4, LOW); //reset pin of decade counter low
+
+  for (int r = 0; r < Rows; r++)
+  {
+    //for 'SPIsettings' spiClk speed is prev declared, MSBFIRST is most sig bit is transmitted first
+    //SPI_MODE can still be looked at, might be 2 instead of 0???
+      vspi->beginTransaction(SPISettings(spiClk, LSBFIRST, SPI_MODE0)); //begins spi transaction
+      //for driving latch low for shift register and counter low for the decade counter
+      digitalWrite(vspi->pinSS(), LOW);  //pull SS low to prep other end for transfer
+    
+    for(int c = 6; c > -1; c--)
+    {
+      //for transferring the desired data
+      vspi->transfer(array[r][c]);
+      //
+    } 
+
+    //every high signal latches the shift register data and counts the decade counter to the next row of LEDs
+      digitalWrite(vspi->pinSS(), HIGH);  //pull ss high to signify end of data transfer
+      vspi->endTransaction(); //ends SPI transaction
+      //delay(100); //this delay can be increased a lot to show individual rows cycling through
+  }
+
+  unsigned long now_time = millis();
+
+  if (now_time - past_time >= 300)
+  {
+    digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+    idle_cycle(); //cycles through notes
+    //delay(200); //eventually remove just a debounce for proof of concept
+
+    past_time = now_time;
+  }
+  else
+  {
+    digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+  //delay(10);
+  }
+
+  //digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+  //delay(10);
+}
+
+void idle_cycle() 
+{
+    for (int i = 0; i < ShiftRegNum; i++) 
+    {
+        idle_hold[i] = idle_fourth[i];
+        idle_fourth[i] = idle_third[i];
+        idle_third[i] = idle_second[i];
+        idle_second[i] = idle_first[i];
+        idle_first[i] = idle_next[i];
+        idle_next[i] = idle_hold[i];
+    }
+    }
+
+
+
+//#define DELAY 300  //general delay used between writes to a row of shift registers
+
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
@@ -863,24 +946,27 @@ void loop() {
     WiFiClient client;
 
     File readFile = SPIFFS.open("/recording.mid","r");
-    File writeFile = SPIFFS.open("/demo.mid","w+");
+   
 
     if (!client.connect(host, port)) {
+        //pinMode(LED_BUILTIN, LOW);
+        //Serial.println("Connection to host failed.");
+        //Serial.println("Waiting 5 seconds before retrying...");
+        //delay(5000);
+
+    unsigned long n_time = millis();
+
+      if (n_time - p_time >= 5000)
+      {
         pinMode(LED_BUILTIN, LOW);
         Serial.println("Connection to host failed.");
         Serial.println("Waiting 5 seconds before retrying...");
-        delay(5000);
-        ++timeout;
-        if(timeout == 6) 
-        { 
-          client.print("DEMO\n\n");
-          while(writeFile.available())
-          {
-            char byte = writeFile.read();
-            midi.push_back(byte);
-          }
-          goto JUMP;
-        }
+        p_time = n_time;
+      }
+      else
+      {
+          idle_waterfall_display(); 
+      }
         return;
     }
 
@@ -903,11 +989,12 @@ void loop() {
         //read back one line from the server
         char c = client.read();
         midi.push_back(c);
-        writeFile.write(c);
+        
         Serial.print(c);
   }
 
-JUMP:
+
+
 if(mode == PLAYBACK_MODE)
 {
     // Open the MIDI file
