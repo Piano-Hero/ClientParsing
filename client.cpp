@@ -10,6 +10,7 @@
 #include <vector>
 #include <FS.h>
 #include <SPIFFS.h>
+#include <SPI.h>
 
 //Serial.print("");
 //Serial.println("");
@@ -605,10 +606,217 @@ void recording(std::bitset<88> notesplayed[])
 #define LED_BUILTIN 2
 #define RECORDING_MODE 0
 #define PLAYBACK_MODE 1
+
+
+//bens code
+static const long long int spiClk = 1000000;  // 1 MHz
+SPIClass* vspi = NULL;
+
+int note_bytes[11] = {0};
+unsigned long previous_time = 0;
+
+#define DELAY 2000  //general delay used between writes to a row of shift registers
+#define ShiftRegNum 11 //number of shift registers to test
+#define Rows 4        //how many rows of LEDs
+#define LED 2         //pin for LED on board of ESP32 (for debugging purposes)
+//these are all arbitrary values
+//Cadens code should write into the 'next' array with bits and it should cycle through from there
+//for PIC24
+int next[11] = { 0};
+int  first[11] = { 0 }; //initial first row
+int  second[11] = { 0 };//initial second row
+int third[11] = { 0 };//initial third row
+int  fourth[11] = { 0 };
+//for ESP32
+// int next =    0b111111111111;
+// int first =   0b100011000000; //initial first row
+// int second=   0b010000110000;//initial second row
+// int third =   0b001000001100;//initial third row
+// int fourth =  0b000100000011;//initial fourth row
+// int hold =    0b000000000000;
+//just used to cycle through these arrays to show movement and working ^^^
+
+//used to 'push down' arrays and fill the next one with incoming new data
+void cycle() 
+{
+    for (int i = 0; i < ShiftRegNum; i++) 
+    {
+        fourth[i] = third[i];
+        third[i] = second[i];
+        second[i] = first[i];
+        first[i] = next[i];
+        next[i] =note_bytes[i];
+    }
+    //next = Cadens data!!!! (these may need to be floats or broken back up into an array)
+}
+
+//if desired to show static LED arrays (spelling a word or something)
+void static_display(int array[Rows][ShiftRegNum]) 
+{
+  digitalWrite(4, LOW); //reset pin of decade counter low
+
+  for (int r = 0; r < Rows; r++)
+  {
+    //for 'SPIsettings' spiClk speed is prev declared, MSBFIRST is most sig bit is transmitted first
+    //SPI_MODE can still be looked at, might be 2 instead of 0???
+      vspi->beginTransaction(SPISettings(spiClk, MSBFIRST, SPI_MODE0)); //begins spi transaction
+      //for driving latch low for shift register and counter low for the decade counter
+      digitalWrite(vspi->pinSS(), LOW);  //pull SS low to prep other end for transfer
+    
+    for(int c = 0; c < ShiftRegNum; c++)
+    {
+      //for transferring the desired data
+      vspi->transfer(array[r][c]);
+      //
+    } 
+
+    //every high signal latches the shift register data and counts the decade counter to the next row of LEDs
+      digitalWrite(vspi->pinSS(), HIGH);  //pull ss high to signify end of data transfer
+      vspi->endTransaction(); //ends SPI transaction
+      //delay(1000); //this delay can be increased a lot to show individual rows cycling through
+  }
+
+  digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+  //delay(10);
+}
+
+//for 'waterfall' effect (what we will be using for the learning experience)
+void waterfall_display() 
+{
+  //std::bitset<8> array[Rows][ShiftRegNum];
+  //after every cycle function this will be updated to next iteration of notes
+    int array[Rows][ShiftRegNum];
+
+         for (int k = 0; k<ShiftRegNum ; k++) 
+       {
+        array[0][k] = first[k];
+        array[1][k] = second[k];
+        array[2][k] = third[k];
+        array[3][k] = fourth[k];
+       }
+
+  digitalWrite(4, LOW); //reset pin of decade counter low
+
+  for (int r = 0; r < Rows; r++)
+  {
+    //for 'SPIsettings' spiClk speed is prev declared, MSBFIRST is most sig bit is transmitted first
+    //SPI_MODE can still be looked at, might be 2 instead of 0???
+      vspi->beginTransaction(SPISettings(spiClk, MSBFIRST, SPI_MODE0)); //begins spi transaction
+      //for driving latch low for shift register and counter low for the decade counter
+      digitalWrite(vspi->pinSS(), LOW);  //pull SS low to prep other end for transfer
+    
+    for(int c = 8; c > 2; c--)
+    {
+      //for transferring the desired data
+      vspi->transfer(array[r][c]);
+      //
+    } 
+
+    //every high signal latches the shift register data and counts the decade counter to the next row of LEDs
+      digitalWrite(vspi->pinSS(), HIGH);  //pull ss high to signify end of data transfer
+      vspi->endTransaction(); //ends SPI transaction
+      //delay(1000); //this delay can be increased a lot to show individual rows cycling through
+  }
+
+  //digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+  //delay(10);
+}
+
+
+//Ron code
+
+const int clock_pin = 13;
+const int clock_inhibit = 14;
+const int shift_load = 15;
+const int q_h = 16;
+const long shift_interval = 1000;  // Function will be called once a millisecond
+int i = 0;
+int k = 0;
+std::bitset<8> keyPress = 0;
+std::bitset<8> shift_register_1 = 0;
+std::bitset<8> shift_register_2 = 0;
+std::bitset<8> shift_register_3 = 0;
+std::bitset<8> shift_register_4 = 0;
+std::bitset<8> shift_register_5 = 0;
+std::bitset<8> shift_register_6 = 0;
+std::bitset<8> shift_register_7 = 0;
+std::bitset<8> shift_register_8 = 0;
+std::bitset<8> shift_register_9 = 0;
+std::bitset<8> shift_register_10 = 0;
+std::bitset<8> shift_register_11 = 0;
+std::bitset<88> output;
+
+
+std::bitset<8> receiveSR(void) {
+    std::bitset<8> shift_register = {};
+
+    for (i = 0; i < 8; i++) {
+        if (i < 3)
+        {}
+        else if (digitalRead(q_h) == HIGH) {
+            shift_register.set(i);  // Load output into variable
+        }
+        else {
+            shift_register.reset(i);  // Load output into variable
+        }
+
+
+        // Clock toggle
+        digitalWrite(clock_pin, HIGH);
+        digitalWrite(clock_pin, LOW);
+    }
+
+    return shift_register;
+}
+void readSR(void) {
+    output.reset();
+    shift_register_1.reset();
+
+    digitalWrite(shift_load, LOW); // Load the registers
+    digitalWrite(shift_load, HIGH); // Prepare to shift
+    digitalWrite(clock_inhibit, LOW); // Clock can now be used
+
+    shift_register_1 = receiveSR();
+          for(int i = 3; i < 8; i++)
+          {
+              // Set the bit in the byte
+              if (shift_register_1[i]) 
+              {
+                  output.set(i+25); // Set the bit to 1
+                  Serial.print("X");
+              } 
+              else 
+              {
+                  output.reset(i+25); // Set the bit to 0 (optional, already initialized to 0)
+                  Serial.print(".");
+              }
+          }
+          Serial.println();
+    
+    
+
+    digitalWrite(clock_inhibit, HIGH); // Disable the clock
+
+    return;
+}
+
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
     Serial.begin(115200);
+    pinMode(clock_pin, OUTPUT);
+    pinMode(clock_inhibit, OUTPUT);
+    pinMode(shift_load, OUTPUT);
+    pinMode(q_h, INPUT);
+    // initialize built-in LED pin as an output.
+    pinMode(LED, OUTPUT);
+    pinMode(4, OUTPUT);   //pin to reset decade counter so there is no weird delay
+    pinMode(0, INPUT);
+    
+    //finishing setting up vspi
+    vspi = new SPIClass(VSPI);
+    vspi->begin();
+    pinMode(vspi->pinSS(), OUTPUT);
 
     if(SPIFFS.begin(true))
     {
@@ -723,7 +931,6 @@ if(mode == PLAYBACK_MODE)
         bitsets[17][48] = 0;
         bitsets[18][48] = 1;
         bitsets[19][48] = 0;
-        // Call recording function
         recording(bitsets);
         client.print("PUT\n\n");
         while(readFile.available())
@@ -867,32 +1074,94 @@ if(mode == PLAYBACK_MODE)
         }
     }
     
-    for (int index = 0; index < midiData.bitmap.size(); index++)
+    for (int index = 0; index < midiData.bitmap.size()+3; index++)
     {
-        std::bitset<88>& bitVector = midiData.bitmap[index * counter];
+      std::bitset<88> bitVector;
+      if(index < midiData.bitmap.size())
+      {
+         bitVector = midiData.bitmap[index * counter];
+      }
+      else
+      {
+        bitVector.reset();
+      }
         bool fl = false;
         for (int count = 0; count < 88; count++)
         {
-            if (bitVector[count] == true)
+            if (bitVector[count] == true) 
             {
                       fl = true;
             }
         }
-        if (fl == false)
+        if ((fl == false) && !(midiData.bitmap.size() <= index))
         {
             continue;
         }
+
+        
+
+        //waterfall_display(bitVector);
         for (int count = 0; count < 88; count++)
         {
-            if (bitVector[count] == false)
-            {
-                Serial.print("0");
+              int byteIndex = count / 8; // Calculate the index of the byte in thenote_bytes array
+              int bitIndex = count % 8;  // Calculate the index of the bit within the byte
+
+              // Set the bit in the byte
+              if (bitVector[count]) 
+              {
+                 note_bytes[byteIndex] |= (1 << bitIndex); // Set the bit to 1
+                  Serial.print("X");
+              } 
+              else 
+              {
+                 note_bytes[byteIndex] &= ~(1 << bitIndex); // Set the bit to 0 (optional, already initialized to 0)
+                  Serial.print(".");
+              }
+          }
+
+          // Output the 11 8-bit array elements
+  for (int i = 0; i < 11; i++) {
+      Serial.print(note_bytes[i], BIN); // Output in binary format
+      Serial.print(" "); // Separate bytes with a space
+  }
+
+          bool flag = 1;
+          while(flag == 1)
+          {
+            waterfall_display();
+
+
+            unsigned long current_time = millis();
+
+            if (current_time - previous_time >= 1000)
+              {
+              digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+              cycle(); //cycles through notes
+              //delay(200); //eventually remove just a debounce for proof of concept
+              flag = 0;
+              previous_time = current_time;
             }
-            else if (bitVector[count] == true)
+            else
             {
-                Serial.print("1");
+              digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+            //delay(10);
             }
-        }
+/*
+            if(digitalRead(0) == 0) //if 'correct' buttons are pressed example
+            {
+              digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+              cycle(); //cycles through notes
+              delay(200); //eventually remove just a debounce for proof of concept
+              flag = 0;
+            }
+            else
+            {
+              digitalWrite(4, HIGH); //reset pin of decade counter high to reset the counter to remove the delay
+            //delay(10);
+            }
+          }
+*/          
+          }
         Serial.println("line end");
         //std::cin.ignore(); // Ignore any previous input
         //std::cin.get(); // Wait for a key press
